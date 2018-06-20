@@ -8,6 +8,7 @@ from graphene.types import Field, List
 from graphene.relay import ConnectionField, PageInfo
 from graphql_relay.connection.arrayconnection import connection_from_list_slice
 
+from .exceptions import PermissionDenied
 from .settings import graphene_settings
 from .utils import maybe_queryset
 
@@ -31,7 +32,7 @@ class DjangoListField(Field):
 
 class DjangoConnectionField(ConnectionField):
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, node_type, *args, **kwargs):
         self.on = kwargs.pop('on', False)
         self.max_limit = kwargs.pop(
             'max_limit',
@@ -41,7 +42,14 @@ class DjangoConnectionField(ConnectionField):
             'enforce_first_or_last',
             graphene_settings.RELAY_CONNECTION_ENFORCE_FIRST_OR_LAST
         )
-        super(DjangoConnectionField, self).__init__(*args, **kwargs)
+
+        self.permission_classes = kwargs.pop(
+            'permission_classes',
+            getattr(node_type, 'permission_classes', None) or
+            getattr(self, 'permission_classes', None)
+        )
+
+        super(DjangoConnectionField, self).__init__(node_type, *args, **kwargs)
 
     @property
     def type(self):
@@ -66,14 +74,24 @@ class DjangoConnectionField(ConnectionField):
             return self.model._default_manager
 
     @classmethod
+    def get_permission_classes(cls, permission_classes, info):
+        return permission_classes
+
+    @classmethod
+    def ensure_permission(cls, permission_classes, info):
+        for permission in cls.get_permission_classes(permission_classes, info) or []:
+            if not permission(node_type=connection._meta.node).has_connection_permission(info):
+                raise PermissionDenied
+
+    @classmethod 
     def merge_querysets(cls, default_queryset, queryset):
         if default_queryset.query.distinct and not queryset.query.distinct:
             queryset = queryset.distinct()
         elif queryset.query.distinct and not default_queryset.query.distinct:
             default_queryset = default_queryset.distinct()
-        return queryset & default_queryset
+        return default_queryset & queryset
 
-    @classmethod
+    @classmethod 
     def resolve_connection(cls, connection, default_manager, args, iterable):
         if iterable is None:
             iterable = default_manager
@@ -101,7 +119,10 @@ class DjangoConnectionField(ConnectionField):
 
     @classmethod
     def connection_resolver(cls, resolver, connection, default_manager, max_limit,
-                            enforce_first_or_last, root, info, **args):
+                            enforce_first_or_last, permission_classes, root, info, **args):
+
+        cls.ensure_permission(permission_classes, info)
+
         first = args.get('first')
         last = args.get('last')
 
@@ -138,5 +159,6 @@ class DjangoConnectionField(ConnectionField):
             self.type,
             self.get_manager(),
             self.max_limit,
-            self.enforce_first_or_last
+            self.enforce_first_or_last,
+            self.permission_classes
         )

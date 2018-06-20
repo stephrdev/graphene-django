@@ -3,6 +3,7 @@ from functools import partial
 
 from graphene.types.argument import to_arguments
 from ..fields import DjangoConnectionField
+from .exceptions import ValidationError
 from .utils import get_filtering_args_from_filterset, get_filterset_class
 
 
@@ -67,21 +68,27 @@ class DjangoFilterConnectionField(DjangoConnectionField):
 
     @classmethod
     def connection_resolver(cls, resolver, connection, default_manager, max_limit,
-                            enforce_first_or_last, filterset_class, filtering_args,
-                            root, info, **args):
+                            enforce_first_or_last, permission_classes, filterset_class,
+                            filtering_args, root, info, **args):
+
+        cls.ensure_permission(permission_classes, info)
+
         filter_kwargs = {k: v for k, v in args.items() if k in filtering_args}
-        qs = filterset_class(
+        filterset = filterset_class(
             data=filter_kwargs,
             queryset=default_manager.get_queryset(),
             request=info.context
-        ).qs
+        )
+        if not filterset.form.is_valid():
+            raise ValidationError(errors=filterset.form.errors)
 
         return super(DjangoFilterConnectionField, cls).connection_resolver(
             resolver,
             connection,
-            qs,
+            filterset.qs,
             max_limit,
             enforce_first_or_last,
+            None,  # we dont pass permission_classes, already checked.
             root,
             info,
             **args
@@ -95,6 +102,7 @@ class DjangoFilterConnectionField(DjangoConnectionField):
             self.get_manager(),
             self.max_limit,
             self.enforce_first_or_last,
+            self.permission_classes
             self.filterset_class,
             self.filtering_args
         )
