@@ -38,6 +38,25 @@ def get_choices(choices):
             yield name, value, description
 
 
+def get_choices_enum(name, original_choices):
+    choices = list(get_choices(original_choices))
+    choices_descriptions = {choice[0]: choice[2] for choice in choices}
+
+    class EnumWithDescriptionsType(object):
+
+        @property
+        def description(self):
+            return choices_descriptions[self.name]
+
+    enum = graphene.Enum(
+        name,
+        [(choice[0], choice[1]) for choice in choices],
+        type=EnumWithDescriptionsType
+    )
+    enum.choices = original_choices
+    return enum
+
+
 def convert_django_field_with_choices(field, registry=None):
     if registry is not None:
         converted = registry.get_converted_field(field)
@@ -47,17 +66,7 @@ def convert_django_field_with_choices(field, registry=None):
     if choices:
         meta = field.model._meta
         name = to_camel_case('{}_{}'.format(meta.object_name, field.name))
-        choices = list(get_choices(choices))
-        named_choices = [(c[0], c[1]) for c in choices]
-        named_choices_descriptions = {c[0]: c[2] for c in choices}
-
-        class EnumWithDescriptionsType(object):
-
-            @property
-            def description(self):
-                return named_choices_descriptions[self.name]
-
-        enum = Enum(name, list(named_choices), type=EnumWithDescriptionsType)
+        enum = get_choices_enum(name, choices)
         converted = enum(description=field.help_text, required=not field.null)
     else:
         converted = convert_django_field(field, registry)
