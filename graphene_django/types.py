@@ -6,6 +6,7 @@ from graphene.relay import Connection, Node
 from graphene.types.objecttype import ObjectType, ObjectTypeOptions
 from graphene.types.utils import yank_fields_from_attrs
 
+from .connections import CountableConnection
 from .converter import convert_django_field_with_choices
 from .registry import Registry, get_global_registry
 from .utils import (DJANGO_FILTER_INSTALLED, get_model_fields,
@@ -72,7 +73,7 @@ class DjangoObjectType(ObjectType):
         if use_connection and not connection:
             # We create the connection automatically
             if not connection_class:
-                connection_class = Connection
+                connection_class = CountableConnection
 
             connection = connection_class.create_type(
                 '{}Connection'.format(cls.__name__), node=cls)
