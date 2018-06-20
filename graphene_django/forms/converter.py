@@ -3,7 +3,8 @@ from django.core.exceptions import ImproperlyConfigured
 
 from graphene import ID, Boolean, Float, Int, List, String, UUID, Date, DateTime, Time
 
-from .forms import GlobalIDFormField, GlobalIDMultipleChoiceField
+from .forms import (
+    EnumField, GlobalIDFormField, GlobalIDMultipleChoiceField, MultipleEnumField)
 from ..utils import import_single_dispatch
 
 
@@ -83,3 +84,14 @@ def convert_form_field_to_time(field):
 @convert_form_field.register(GlobalIDFormField)
 def convert_form_field_to_id(field):
     return ID(required=field.required)
+
+
+@convert_form_field.register(EnumField)
+def convert_enumfield(field):
+    return field.get_enum()(description=field.help_text, required=field.required)
+
+
+@convert_form_field.register(MultipleEnumField)
+def convert_multipleenumfield(field):
+    return graphene.List(
+        field.get_enum(), description=field.help_text, required=field.required)

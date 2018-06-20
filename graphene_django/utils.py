@@ -2,7 +2,7 @@ import inspect
 
 from django.db import models
 from django.db.models.manager import Manager
-
+from graphql_relay import from_global_id
 
 # from graphene.utils import LazyList
 
@@ -81,3 +81,18 @@ def import_single_dispatch():
         )
 
     return singledispatch
+
+
+def get_and_validate_global_id(target_node_type, lookup_value):
+    try:
+        node_type, node_id = from_global_id(lookup_value)
+        node_id = int(node_id)
+    except (TypeError, ValueError):
+        raise ValueError('Invalid value for object lookup')
+
+    if node_type != target_node_type.__name__:
+        raise TypeError(
+            'Invalid node type in lookup value, expected {}, received {}'.format(
+                target_node_type.__name__, node_type))
+
+    return node_id
