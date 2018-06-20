@@ -8,6 +8,7 @@ from graphene.types.utils import yank_fields_from_attrs
 
 from .connections import CountableConnection
 from .converter import convert_django_field_with_choices
+from .exceptions import PermissionDenied
 from .registry import Registry, get_global_registry
 from .utils import (DJANGO_FILTER_INSTALLED, get_model_fields,
                     is_valid_django_model)
@@ -38,7 +39,7 @@ class DjangoObjectTypeOptions(ObjectTypeOptions):
     model = None  # type: Model
     registry = None  # type: Registry
     connection = None  # type: Type[Connection]
-
+    permission_classes = None
     filter_fields = ()
 
 
@@ -46,7 +47,7 @@ class DjangoObjectType(ObjectType):
     @classmethod
     def __init_subclass_with_meta__(cls, model=None, registry=None, skip_registry=False,
                                     only_fields=(), exclude_fields=(), filter_fields=None, connection=None,
-                                    connection_class=None, use_connection=None, interfaces=(), _meta=None, **options):
+                                    connection_class=None, use_connection=None, permission_classes=None, interfaces=(), _meta=None, **options):
         assert is_valid_django_model(model), (
             'You need to pass a valid Django Model in {}.Meta, received "{}".'
         ).format(cls.__name__, model)
@@ -91,6 +92,7 @@ class DjangoObjectType(ObjectType):
         _meta.filter_fields = filter_fields
         _meta.fields = django_fields
         _meta.connection = connection
+        _meta.permission_classes = permission_classes
 
         super(DjangoObjectType, cls).__init_subclass_with_meta__(_meta=_meta, interfaces=interfaces, **options)
 
@@ -117,7 +119,19 @@ class DjangoObjectType(ObjectType):
 
     @classmethod
     def get_node(cls, info, id):
+        cls.ensure_permission(info, id)
+
         try:
             return cls._meta.model.objects.get(pk=id)
         except cls._meta.model.DoesNotExist:
             return None
+
+    @classmethod
+    def get_permission_classes(cls, info):
+        return cls._meta.permission_classes
+
+    @classmethod
+    def ensure_permission(cls, info, id=None):
+        for permission in cls.get_permission_classes(info) or []:
+            if not permission(cls).has_node_permission(info, id):
+                raise PermissionDenied
