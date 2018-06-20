@@ -1,6 +1,7 @@
 import inspect
 import json
 import re
+from collections import OrderedDict
 
 import six
 from django.http import HttpResponse, HttpResponseNotAllowed
@@ -12,10 +13,12 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 
 from graphql import get_default_backend
 from graphql.error import format_error as format_graphql_error
-from graphql.error import GraphQLError
+from graphql.error import GraphQLError as OriginalGraphQLError
+from graphql.error.located_error import GraphQLLocatedError
 from graphql.execution import ExecutionResult
 from graphql.type.schema import GraphQLSchema
 
+from .exceptions import GraphQLError
 from .settings import graphene_settings
 
 
@@ -64,6 +67,8 @@ class GraphQLView(View):
     pretty = False
     batch = False
 
+    access_control_allow_origin = '*'
+
     def __init__(self, schema=None, executor=None, middleware=None, root_value=None, graphiql=False, pretty=False,
                  batch=False, backend=None):
         if not schema:
@@ -106,6 +111,12 @@ class GraphQLView(View):
     @method_decorator(ensure_csrf_cookie)
     def dispatch(self, request, *args, **kwargs):
         try:
+            if request.method.lower() == 'options':
+                response = HttpResponse()
+                response['Access-Control-Allow-Origin'] = self.access_control_allow_origin
+                response['Access-Control-Allow-Headers'] = 'X-CSRFToken'
+                return response
+
             if request.method.lower() not in ('get', 'post'):
                 raise HttpError(HttpResponseNotAllowed(
                     ['GET', 'POST'], 'GraphQL only supports GET and POST requests.'))
@@ -312,10 +323,36 @@ class GraphQLView(View):
 
     @staticmethod
     def format_error(error):
-        if isinstance(error, GraphQLError):
-            return format_graphql_error(error)
+        graphql_error = OrderedDict()
 
-        return {'message': six.text_type(error)}
+        if isinstance(error, GraphQLLocatedError):
+            graphql_error = format_graphql_error(error)
+            error = error.original_error
+        else:
+            graphql_error['message'] = str(error)
+
+        if (
+            not isinstance(error, (GraphQLError, OriginalGraphQLError)) and
+            not settings.DEBUG
+        ):
+            graphql_error['message'] = 'Internal server error'
+
+        if isinstance(error, GraphQLError):
+            graphql_error['code'] = error.code
+
+            if error.error_data:
+                graphql_error['data'] = error.error_data
+        else:
+            graphql_error['code'] = 'error'
+
+        if error.__traceback__ is not None:
+            info = error.__traceback__.tb_frame.f_locals.get('info')
+
+            if info is not None:
+                graphql_error['path'] = [info.field_name]
+                graphql_error['operation'] = info.operation.operation
+
+        return graphql_error
 
     @staticmethod
     def get_content_type(request):
